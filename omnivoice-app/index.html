@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OmniVoice — Tamil TTS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181c;
+    --surface2: #222228;
+    --border: #2e2e38;
+    --accent: #7c6af7;
+    --accent-glow: rgba(124, 106, 247, 0.18);
+    --accent-light: #a89cff;
+    --text: #e8e8f0;
+    --text-muted: #8888a0;
+    --success: #4ade80;
+    --error: #f87171;
+    --warning: #fbbf24;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 60px;
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+    margin-bottom: 40px;
+    position: relative;
+  }
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -60px; left: 50%;
+    transform: translateX(-50%);
+    width: 300px; height: 200px;
+    background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), #5b4fcf);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  .logo-text {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+  }
+  .logo-text span { color: var(--accent-light); }
+  .tagline {
+    font-size: 14px;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 32px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--warning);
+    animation: pulse 2s infinite;
+  }
+  .status-dot.ready { background: var(--success); animation: none; }
+  .status-dot.error { background: var(--error); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* Main card */
+  .card {
+    width: 100%;
+    max-width: 640px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .card-section {
+    padding: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-section:last-child { border-bottom: none; }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 14px;
+  }
+
+  /* Text area */
+  textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    padding: 14px 16px;
+    resize: vertical;
+    min-height: 120px;
+    transition: border-color 0.15s;
+    outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  textarea::placeholder { color: var(--text-muted); }
+
+  .char-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: right;
+    margin-top: 6px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Quick phrases */
+  .quick-phrases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .phrase-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: 'Inter', sans-serif;
+  }
+  .phrase-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent-light);
+  }
+
+  /* Voice cloning section */
+  .upload-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+  }
+  .upload-zone input[type="file"] {
+    position: absolute; inset: 0;
+    opacity: 0; cursor: pointer;
+    width: 100%; height: 100%;
+  }
+  .upload-icon { font-size: 28px; margin-bottom: 8px; }
+  .upload-text { font-size: 13px; color: var(--text-muted); }
+  .upload-text strong { color: var(--text); }
+  .upload-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+  .file-selected {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    margin-top: 10px;
+  }
+  .file-selected.visible { display: flex; }
+  .file-name { font-size: 13px; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-remove {
+    background: none; border: none;
+    color: var(--text-muted); cursor: pointer;
+    font-size: 16px; padding: 0 4px;
+    transition: color 0.15s;
+  }
+  .file-remove:hover { color: var(--error); }
+
+  input[type="text"] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    padding: 10px 14px;
+    margin-top: 10px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input[type="text"]:focus { border-color: var(--accent); }
+  input[type="text"]::placeholder { color: var(--text-muted); }
+
+  /* Settings row */
+  .settings-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .setting-item label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    padding: 8px 12px;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238888a0' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+
+  /* Generate button */
+  .generate-btn {
+    width: 100%;
+    background: linear-gradient(135deg, var(--accent), #5b4fcf);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: white;
+    font-family: 'Inter', sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    letter-spacing: 0.2px;
+  }
+  .generate-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+  .generate-btn:active { transform: translateY(0); }
+  .generate-btn:disabled {
+    opacity: 0.5; cursor: not-allowed; transform: none;
+  }
+  .btn-spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  .btn-spinner.visible { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Output */
+  .output-section {
+    display: none;
+    padding: 24px;
+    border-top: 1px solid var(--border);
+  }
+  .output-section.visible { display: block; }
+
+  .audio-player {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  audio { width: 100%; height: 36px; }
+  audio::-webkit-media-controls-panel { background: var(--surface2); }
+
+  .download-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    padding: 9px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: border-color 0.15s;
+  }
+  .download-btn:hover { border-color: var(--accent); color: var(--accent-light); }
+
+  /* Error box */
+  .error-box {
+    display: none;
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--error);
+    margin-top: 12px;
+  }
+  .error-box.visible { display: block; }
+
+  /* Progress bar */
+  .progress-wrap {
+    display: none;
+    margin-top: 12px;
+  }
+  .progress-wrap.visible { display: block; }
+  .progress-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .progress-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-light));
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s;
+    animation: indeterminate 1.5s infinite;
+  }
+  @keyframes indeterminate {
+    0% { transform: translateX(-100%); width: 60%; }
+    100% { transform: translateX(200%); width: 60%; }
+  }
+
+  /* Footer */
+  .footer {
+    margin-top: 28px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  .footer a { color: var(--accent-light); text-decoration: none; }
+
+  @media (max-width: 500px) {
+    .settings-row { grid-template-columns: 1fr; }
+    .quick-phrases { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">🎙️</div>
+    <div class="logo-text">Omni<span>Voice</span></div>
+  </div>
+  <div class="tagline">Tamil & multilingual voice synthesis · running locally</div>
+</div>
+
+<div class="status-bar">
+  <div class="status-dot" id="statusDot"></div>
+  <span id="statusText">Checking model status…</span>
+</div>
+
+<div class="card">
+
+  <!-- Text input -->
+  <div class="card-section">
+    <div class="section-label">Text to speak</div>
+    <textarea id="textInput" placeholder="Type in Tamil or any supported language…
+வணக்கம், என் யூட்யூப் சேனலுக்கு வரவேற்கிறேன்." oninput="updateCharCount()"></textarea>
+    <div class="char-count"><span id="charCount">0</span> characters</div>
+    <div class="quick-phrases">
+      <button class="phrase-btn" onclick="setPhrase('வணக்கம், இன்றைய வீடியோவிற்கு வரவேற்கிறேன்.')">👋 வரவேற்பு</button>
+      <button class="phrase-btn" onclick="setPhrase('இந்த வீடியோவை லைக் செய்து, சேனலை சப்ஸ்கிரைப் செய்யுங்கள்.')">❤️ Subscribe CTA</button>
+      <button class="phrase-btn" onclick="setPhrase('கருத்துகளை கீழே பதிவு செய்யுங்கள்.')">💬 Comment CTA</button>
+      <button class="phrase-btn" onclick="setPhrase('அடுத்த வீடியோவில் சந்திப்போம். நன்றி!')">👋 Outro</button>
+    </div>
+  </div>
+
+  <!-- Voice cloning -->
+  <div class="card-section">
+    <div class="section-label">Voice cloning <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0">(optional — upload your voice sample)</span></div>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="audioFile" accept=".wav,.mp3,.ogg,.flac" onchange="onFileSelect()" />
+      <div class="upload-icon">🎤</div>
+      <div class="upload-text"><strong>Upload voice sample</strong> or drag & drop</div>
+      <div class="upload-hint">WAV · MP3 · OGG · FLAC &nbsp;·&nbsp; min 6 seconds recommended</div>
+    </div>
+    <div class="file-selected" id="fileSelected">
+      <span>🎵</span>
+      <span class="file-name" id="fileName"></span>
+      <button class="file-remove" onclick="removeFile()" title="Remove">✕</button>
+    </div>
+    <input type="text" id="refText" placeholder="Transcription of your voice sample (improves quality)" />
+  </div>
+
+  <!-- Settings -->
+  <div class="card-section">
+    <div class="section-label">Settings</div>
+    <div class="settings-row">
+      <div class="setting-item">
+        <label>Language</label>
+        <select id="langSelect">
+          <option value="ta">Tamil (தமிழ்)</option>
+          <option value="en">English</option>
+          <option value="hi">Hindi (हिन्दी)</option>
+          <option value="te">Telugu (తెలుగు)</option>
+          <option value="ml">Malayalam (മലയാളം)</option>
+          <option value="kn">Kannada (ಕನ್ನಡ)</option>
+          <option value="auto">Auto-detect</option>
+        </select>
+      </div>
+      <div class="setting-item">
+        <label>Output format</label>
+        <select id="fmtSelect">
+          <option value="wav">WAV (lossless)</option>
+          <option value="mp3">MP3</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate -->
+  <div class="card-section" style="border-bottom:none">
+    <button class="generate-btn" id="generateBtn" onclick="generate()">
+      <div class="btn-spinner" id="btnSpinner"></div>
+      <span id="btnText">▶ Generate speech</span>
+    </button>
+    <div class="error-box" id="errorBox"></div>
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-label" id="progressLabel">Generating audio…</div>
+      <div class="progress-bar"><div class="progress-fill"></div></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Output -->
+<div class="output-section card" id="outputSection" style="margin-top:16px">
+  <div class="section-label">Generated audio</div>
+  <div class="audio-player">
+    <audio id="audioPlayer" controls></audio>
+    <a class="download-btn" id="downloadBtn" href="#" download="omnivoice_output.wav">
+      ⬇ Download audio
+    </a>
+  </div>
+</div>
+
+<div class="footer">
+  OmniVoice running locally via Podman &nbsp;·&nbsp;
+  <a href="https://github.com/k2-fsa/OmniVoice" target="_blank">GitHub</a>
+</div>
+
+<script>
+  // Check model status on load
+  async function checkStatus() {
+    try {
+      const r = await fetch('/health');
+      const d = await r.json();
+      const dot = document.getElementById('statusDot');
+      const txt = document.getElementById('statusText');
+      if (d.model_loaded) {
+        dot.className = 'status-dot ready';
+        txt.textContent = 'Model ready · OmniVoice loaded';
+      } else {
+        dot.className = 'status-dot';
+        txt.textContent = 'Model loading… this may take a few minutes';
+        setTimeout(checkStatus, 4000);
+      }
+    } catch {
+      document.getElementById('statusDot').className = 'status-dot error';
+      document.getElementById('statusText').textContent = 'Cannot reach server';
+      setTimeout(checkStatus, 5000);
+    }
+  }
+
+  checkStatus();
+
+  function updateCharCount() {
+    document.getElementById('charCount').textContent =
+      document.getElementById('textInput').value.length;
+  }
+
+  function setPhrase(text) {
+    document.getElementById('textInput').value = text;
+    updateCharCount();
+  }
+
+  function onFileSelect() {
+    const file = document.getElementById('audioFile').files[0];
+    if (!file) return;
+    document.getElementById('fileName').textContent = file.name;
+    document.getElementById('fileSelected').classList.add('visible');
+  }
+
+  function removeFile() {
+    document.getElementById('audioFile').value = '';
+    document.getElementById('fileSelected').classList.remove('visible');
+  }
+
+  // Drag and drop
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      document.getElementById('audioFile').files = dt.files;
+      onFileSelect();
+    }
+  });
+
+  async function generate() {
+    const text = document.getElementById('textInput').value.trim();
+    if (!text) {
+      showError('Please enter some text first.');
+      return;
+    }
+
+    setLoading(true);
+    hideError();
+
+    const formData = new FormData();
+    formData.append('text', text);
+    formData.append('ref_text', document.getElementById('refText').value);
+
+    const audioFile = document.getElementById('audioFile').files[0];
+    if (audioFile) formData.append('ref_audio', audioFile);
+
+    try {
+      const response = await fetch('/generate', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || 'Generation failed');
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+
+      document.getElementById('audioPlayer').src = url;
+      document.getElementById('downloadBtn').href = url;
+      document.getElementById('outputSection').classList.add('visible');
+      document.getElementById('audioPlayer').play();
+
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function setLoading(val) {
+    document.getElementById('generateBtn').disabled = val;
+    document.getElementById('btnSpinner').classList.toggle('visible', val);
+    document.getElementById('btnText').textContent = val ? 'Generating…' : '▶ Generate speech';
+    document.getElementById('progressWrap').classList.toggle('visible', val);
+    if (val) document.getElementById('progressLabel').textContent = 'Generating audio… this may take 30–60s';
+  }
+
+  function showError(msg) {
+    const box = document.getElementById('errorBox');
+    box.textContent = '⚠ ' + msg;
+    box.classList.add('visible');
+  }
+
+  function hideError() {
+    document.getElementById('errorBox').classList.remove('visible');
+  }
+</script>
+</body>
+</html>
