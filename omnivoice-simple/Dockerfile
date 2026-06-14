@@ -19,9 +19,11 @@ ENV TRANSFORMERS_CACHE=/app/model-cache
 ENV PYTHONUNBUFFERED=1
 
 # Install OmniVoice and dependencies
-RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir omnivoice
+
+# Fixed — both pinned to CPU index in the same command
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir omnivoice   # torch/torchaudio already locked to CPU
+
 
 EXPOSE 8001
 
