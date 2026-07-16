@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "users",
+      "columns": [
+        { "name": "id",            "type": "INTEGER", "constraints": "PRIMARY KEY" },
+        { "name": "username",      "type": "TEXT",    "constraints": "NOT NULL UNIQUE" },
+        { "name": "password_hash", "type": "TEXT",    "constraints": "NOT NULL" }
+      ]
+    },
+    {
+      "name": "boards",
+      "columns": [
+        { "name": "id",      "type": "INTEGER", "constraints": "PRIMARY KEY" },
+        { "name": "user_id", "type": "INTEGER", "constraints": "NOT NULL REFERENCES users(id)" }
+      ]
+    },
+    {
+      "name": "columns",
+      "columns": [
+        { "name": "id",       "type": "INTEGER", "constraints": "PRIMARY KEY" },
+        { "name": "board_id", "type": "INTEGER", "constraints": "NOT NULL REFERENCES boards(id)" },
+        { "name": "title",    "type": "TEXT",    "constraints": "NOT NULL" },
+        { "name": "position", "type": "INTEGER", "constraints": "NOT NULL" }
+      ]
+    },
+    {
+      "name": "cards",
+      "columns": [
+        { "name": "id",        "type": "INTEGER", "constraints": "PRIMARY KEY" },
+        { "name": "column_id", "type": "INTEGER", "constraints": "NOT NULL REFERENCES columns(id)" },
+        { "name": "title",     "type": "TEXT",    "constraints": "NOT NULL" },
+        { "name": "details",   "type": "TEXT",    "constraints": "NOT NULL DEFAULT ''" },
+        { "name": "position",  "type": "INTEGER", "constraints": "NOT NULL" }
+      ]
+    }
+  ],
+  "seed": {
+    "description": "On first run, insert one user and one board with five default columns.",
+    "users": [
+      { "id": 1, "username": "user", "password_hash": "<bcrypt of 'password'>" }
+    ],
+    "boards": [
+      { "id": 1, "user_id": 1 }
+    ],
+    "columns": [
+      { "id": 1, "board_id": 1, "title": "Backlog",     "position": 0 },
+      { "id": 2, "board_id": 1, "title": "Discovery",   "position": 1 },
+      { "id": 3, "board_id": 1, "title": "In Progress", "position": 2 },
+      { "id": 4, "board_id": 1, "title": "Review",      "position": 3 },
+      { "id": 5, "board_id": 1, "title": "Done",        "position": 4 }
+    ]
+  }
+}
