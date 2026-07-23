@@ -101,7 +101,6 @@ finally/
 ├── db/                       # Volume mount target (SQLite file lives here at runtime)
 │   └── .gitkeep              # Directory exists in repo; finally.db is gitignored
 ├── Dockerfile                # Multi-stage build (Node → Python)
-├── docker-compose.yml        # Optional convenience wrapper
 ├── .env                      # Environment variables (gitignored, .env.example committed)
 └── .gitignore
 ```
@@ -156,13 +155,16 @@ Both the simulator and the Massive client implement the same abstract interface.
 - Starts from realistic seed prices (e.g., AAPL ~$190, GOOGL ~$175, etc.)
 - Runs as an in-process background task — no external dependencies
 
-### Massive API (Optional)
+### Massive API (Optional — Stretch Goal)
+
+The simulator alone satisfies the core build; Massive integration is a stretch goal layered on top once the simulator-backed app is fully working.
 
 - REST API polling (not WebSocket) — simpler, works on all tiers
 - Polls for the union of all watched tickers on a configurable interval
 - Free tier (5 calls/min): poll every 15 seconds
 - Paid tiers: poll every 2-15 seconds depending on tier
 - Parses REST response into the same format as the simulator
+- **Accepted tradeoff**: since SSE only pushes on an actual price change, real-data mode will feel far less "live" than the simulator (updates every ~15s vs. ~500ms). No client-side interpolation/smoothing is planned to compensate — this is a known, accepted limitation of real-data mode, not a bug.
 
 ### Shared Price Cache
 
@@ -170,12 +172,13 @@ Both the simulator and the Massive client implement the same abstract interface.
 - The cache holds the latest price, previous price, and timestamp for each ticker
 - SSE streams read from this cache and push updates to connected clients
 - This architecture supports future multi-user scenarios without changes to the data layer
+- The set of tracked tickers is the **union of the watchlist and any ticker with an open position** — removing a ticker from the watchlist does not stop tracking it if the user still holds shares (see §8), so portfolio valuation always has a current price to work with
 
 ### SSE Streaming
 
 - Endpoint: `GET /api/stream/prices`
 - Long-lived SSE connection; client uses native `EventSource` API
-- Server pushes price updates for all tickers known to the system at a regular cadence (~500ms) — in the single-user model this is equivalent to the user's watchlist
+- Server pushes price updates for all tracked tickers (watchlist ∪ open positions, per above) at a regular cadence (~500ms)
 - Each SSE event contains ticker, price, previous price, timestamp, and change direction
 - Client handles reconnection automatically (EventSource has built-in retry)
 
@@ -194,6 +197,8 @@ The backend checks for the SQLite database on startup (or first request). If the
 ### Schema
 
 All tables include a `user_id` column defaulting to `"default"`. This is hardcoded for now (single-user) but enables future multi-user support without schema migration.
+
+Tickers are normalized to **uppercase** at the API boundary before any insert or lookup against `watchlist`, `positions`, or `trades`, so `"aapl"` and `"AAPL"` are always treated as the same ticker and can't create duplicate rows past the `UNIQUE(user_id, ticker)` constraints.
 
 **users_profile** — User state (cash balance)
 - `id` TEXT PRIMARY KEY (default: `"default"`)
@@ -215,6 +220,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 - `avg_cost` REAL
 - `updated_at` TEXT (ISO timestamp)
 - UNIQUE constraint on `(user_id, ticker)`
+- **Cost-basis rule**: `avg_cost` is a weighted average, recomputed on every **buy** as `(old_qty * old_avg_cost + buy_qty * buy_price) / (old_qty + buy_qty)`. **Sells** never change `avg_cost` — they only reduce `quantity` (deleting the row if it hits zero); realized P&L for a sell is `(sell_price - avg_cost) * sell_qty`, computed on the fly rather than stored
 
 **trades** — Trade history (append-only log)
 - `id` TEXT PRIMARY KEY (UUID)
@@ -225,7 +231,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 - `price` REAL
 - `executed_at` TEXT (ISO timestamp)
 
-**portfolio_snapshots** — Portfolio value over time (for P&L chart). Recorded every 30 seconds by a background task, and immediately after each trade execution.
+**portfolio_snapshots** — Portfolio value over time (for P&L chart). Recorded every 30 seconds by a background task, immediately after each trade execution, and once at profile seed time (see Default Seed Data below) so the chart is never empty on a fresh start.
 - `id` TEXT PRIMARY KEY (UUID)
 - `user_id` TEXT (default: `"default"`)
 - `total_value` REAL
@@ -243,6 +249,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 
 - One user profile: `id="default"`, `cash_balance=10000.0`
 - Ten watchlist entries: AAPL, GOOGL, MSFT, AMZN, TSLA, NVDA, META, JPM, V, NFLX
+- One `portfolio_snapshots` row: `total_value=10000.0` at seed time (no positions yet, so total value equals cash)
 
 ---
 
@@ -257,7 +264,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/portfolio` | Current positions, cash balance, total value, unrealized P&L |
-| POST | `/api/portfolio/trade` | Execute a trade: `{ticker, quantity, side}` |
+| POST | `/api/portfolio/trade` | Execute a trade: `{ticker, quantity, side}`. On validation failure (insufficient cash on a buy, insufficient shares on a sell) responds `400` with `{"error": "<human-readable reason>"}`; this is the same error shape the LLM-initiated trade path (§9) surfaces back into the chat response |
 | GET | `/api/portfolio/history` | Portfolio value snapshots over time (for P&L chart) |
 
 ### Watchlist
@@ -265,7 +272,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 |--------|------|-------------|
 | GET | `/api/watchlist` | Current watchlist tickers with latest prices |
 | POST | `/api/watchlist` | Add a ticker: `{ticker}` |
-| DELETE | `/api/watchlist/{ticker}` | Remove a ticker |
+| DELETE | `/api/watchlist/{ticker}` | Remove a ticker from the watchlist. If the user still holds a position in it, the position is untouched and keeps being priced/valued (see §6) — it just drops out of the watchlist panel until re-added |
 
 ### Chat
 | Method | Path | Description |
@@ -290,10 +297,10 @@ There is an OPENROUTER_API_KEY in the .env file in the project root.
 When the user sends a chat message, the backend:
 
 1. Loads the user's current portfolio context (cash, positions with P&L, watchlist with live prices, total portfolio value)
-2. Loads recent conversation history from the `chat_messages` table
+2. Loads recent conversation history from the `chat_messages` table, capped to the **last 20 messages (10 turns)** to bound prompt size, cost, and latency as a session grows
 3. Constructs a prompt with a system message, portfolio context, conversation history, and the user's new message
-4. Calls the LLM via LiteLLM → OpenRouter, requesting structured output, using the cerebras-inference skill
-5. Parses the complete structured JSON response
+4. Calls the LLM via LiteLLM → OpenRouter, requesting structured output via `response_format=<PydanticModel>` per the cerebras-inference skill (Cerebras/OpenRouter supports this natively for `openrouter/openai/gpt-oss-120b`)
+5. Parses the response into the pydantic model matching the schema below (`Model.model_validate_json(...)`). If parsing fails, retry the call once; if it fails again, fall back to a generic "I had trouble processing that, please try again" message with empty `trades`/`watchlist_changes`
 6. Auto-executes any trades or watchlist changes specified in the response
 7. Stores the message and executed actions in `chat_messages`
 8. Returns the complete JSON response to the frontend (no token-by-token streaming — Cerebras inference is fast enough that a loading indicator is sufficient)
@@ -344,6 +351,8 @@ When `LLM_MOCK=true`, the backend returns deterministic mock responses instead o
 - Development without an API key
 - CI/CD pipelines
 
+**Mock logic**: a small rule-based matcher inspects the incoming message (not an LLM call) — e.g. a `buy|sell` keyword plus a recognized ticker symbol in the text produces a matching `trades` entry and a canned confirmation `message`; an `add|remove` keyword plus a ticker produces a `watchlist_changes` entry; anything else returns a generic canned `message` with empty `trades`/`watchlist_changes`. This gives E2E tests a stable, assertable mapping from input text to output JSON.
+
 ---
 
 ## 10. Frontend Design
@@ -364,7 +373,7 @@ The frontend is a single-page application with a dense, terminal-inspired layout
 ### Technical Notes
 
 - Use `EventSource` for SSE connection to `/api/stream/prices`
-- Canvas-based charting library preferred (Lightweight Charts or Recharts) for performance
+- Charting library split by use case: **Lightweight Charts** for the main per-ticker price chart and watchlist sparklines (built for financial time series, canvas-based, fast); **Recharts** for the portfolio heatmap (its built-in `Treemap` component) and the P&L line chart (simpler declarative charts where Lightweight Charts' finance-specific API doesn't fit)
 - Price flash effect: on receiving a new price, briefly apply a CSS class with background color transition, then remove it
 - All API calls go to the same origin (`/api/*`) — no CORS configuration needed
 - Tailwind CSS for styling with a custom dark theme
