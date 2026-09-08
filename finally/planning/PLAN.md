@@ -402,10 +402,10 @@ FastAPI serves the static frontend files and all API routes on port 8000.
 
 ### Docker Volume
 
-The SQLite database persists via a named Docker volume:
+The SQLite database persists via a **bind mount** of the top-level `db/` directory (not a named Docker volume — see §13.2):
 
 ```bash
-docker run -v finally-data:/app/db -p 8000:8000 --env-file .env finally
+docker run -v "$(pwd)/db:/app/db" -p 8000:8000 --env-file .env finally
 ```
 
 The `db/` directory in the project root maps to `/app/db` in the container. The backend writes `finally.db` to this path.
@@ -463,3 +463,45 @@ The container is designed to deploy to AWS App Runner, Render, or any container 
 - Portfolio visualization: heatmap renders with correct colors, P&L chart has data points
 - AI chat (mocked): send a message, receive a response, trade execution appears inline
 - SSE resilience: disconnect and verify reconnection
+
+---
+
+## 13. Architecture Decisions (Resolving Open Questions)
+
+These decisions are binding for all agents. They resolve ambiguities identified during plan review (`planning/REVIEW.md`) and take precedence over any conflicting inference from earlier sections.
+
+**13.1 Uvicorn runs with exactly one worker.** The in-memory price cache and the market-data background task are process-local. Running `uvicorn --workers > 1` (or any multi-process server) would give each worker its own cache and its own background task, producing inconsistent prices across requests/SSE connections. This is a single-local-user app; horizontal scaling is out of scope.
+
+**Do not pass `--workers 1` explicitly in the Dockerfile `CMD`.** Passing `--workers 1` (even at 1) activates uvicorn's multiprocess supervisor, which exits as soon as stdin closes — i.e. immediately under `docker run -d`, causing the container to die seconds after "Application startup complete" with exit code 0. **Omit `--workers` entirely** instead; uvicorn's default with no `--workers` flag is a single process with no supervisor/fork at all, which is both the literal single-process behavior this decision requires and the form that survives detached container execution. (Found during devops implementation — see git history/task #7 for verification detail.)
+
+**13.2 Database persistence uses a bind mount, not a named volume.** `docker run -v "$(pwd)/db:/app/db" ...` (already corrected in §11). This matches §4's description of `db/` as a project-root directory containing `finally.db`, viewable/backuppable directly on the host.
+
+**13.3 SQLite access: `aiosqlite`, WAL mode enabled.** The backend uses `aiosqlite` for all database access from async route handlers and background tasks, so long-running writes (e.g., a chat-triggered trade) never block the event loop that also drives the ~500ms SSE push loop. Enable `PRAGMA journal_mode=WAL` on startup for better concurrent read/write behavior between the background snapshot task and request handlers.
+
+**13.4 Ticker universe is open, not closed.** Any ticker string can be added to the watchlist or traded — there is no fixed enumerable list. Validation at the API boundary: uppercase-normalize, require 1–5 alphanumeric characters, reject anything else with `400`. When the simulator (or Massive client) sees a ticker for the first time, it synthesizes a deterministic seed price in the $10–$500 range by hashing the ticker string (e.g. `10 + (hash(ticker) % 490)`) so repeated runs are stable and any two backends seed the same ticker identically. This price then evolves via the normal GBM process like any seeded ticker.
+
+**13.5 Trade history is exposed via API, not a dedicated UI panel.** Add `GET /api/trades` (append to §8's Portfolio table) returning the full `trades` log for `user_id="default"`, most recent first. No new frontend panel is required for v1 — the positions table covers current-state needs; trade history is available for the AI chat to reference and for future UI work.
+
+**13.6 `/api/chat` request body and response state.** Request body: `{"message": string}`. When the response includes non-empty `trades` or `watchlist_changes`, the response also includes the **post-execution** `portfolio` and `watchlist` objects (same shapes as `GET /api/portfolio` and `GET /api/watchlist`) inline, so the frontend never has to guess whether a re-fetch is needed — it always has fresh state after any chat turn that mutates something. When both arrays are empty, these fields are omitted (or null).
+
+**13.7 Multi-action chat turns execute sequentially, trades before watchlist changes.** If the LLM returns multiple `trades`, they execute in array order, each against the cash/position state left by the previous one (so a sell can fund a later buy in the same turn). All `trades` execute before any `watchlist_changes`. If a trade in the middle of the sequence fails validation, later trades in the array are skipped (not attempted), the failure is reported in the chat response's error context, and watchlist_changes still execute.
+
+**13.8 Fractional-share comparisons use an epsilon tolerance.** All quantity comparisons in trade validation ("insufficient shares") and position-zeroing ("delete row when quantity hits zero") use a tolerance of `1e-6` rather than exact equality/inequality, to absorb float drift from repeated fractional trades.
+
+**13.9 LLM failure handling covers both parse and transport failures.** The retry-once-then-fallback behavior in §9 step 5 applies uniformly: any exception from the LLM call (timeout, HTTP error, rate limit, malformed/unparseable structured output) triggers one retry; a second failure of any kind falls back to the generic "I had trouble processing that, please try again" message with empty `trades`/`watchlist_changes`.
+
+**13.10 Pinned colors.** Beyond the three named accents (§2), price-flash/sparkline/heatmap P&L coloring uses: **Positive/green `#26a69a`**, **Negative/red `#ef5350`** (standard trading-terminal green/red, legible on the dark backgrounds in §2, distinct from the existing yellow/blue/purple accents). Flash animation: brief background tint at ~20% opacity of these colors, fading to transparent over ~500ms.
+
+**13.11 Client-side price history buffering.** The frontend's SSE-fed price history (used for sparklines and the main chart, §2/§10) is a single shared per-ticker rolling buffer capped at **600 points** (~5 minutes at 500ms cadence), evicting oldest points past the cap. Buffering continues in the background for every tracked ticker (watchlist ∪ open positions), not just the currently-selected one, so switching the main chart's selection never shows a truncated/empty history for a ticker that's been on-screen since page load. A ticker added mid-session starts its buffer empty and fills forward from that point.
+
+**13.12 No pagination on `portfolio_snapshots` / `GET /api/portfolio/history` for v1.** Acceptable for expected demo/course session lengths; not a blocking concern for this build.
+
+**13.13 Exact response envelopes and field names (resolving a live frontend/backend mismatch).** §8 didn't pin exact JSON shapes, so the two sides diverged. Backend's already-implemented, already-tested shapes are authoritative; frontend adapts to them (cheaper than reworking tested backend routes, and envelopes leave room to add fields like pagination later without breaking array indexing):
+
+- Collection endpoints return a **named envelope**, not a bare array: `GET /api/watchlist` → `{"watchlist": [...]}`; `GET /api/trades` → `{"trades": [...]}`; `GET /api/portfolio/history` → `{"snapshots": [...]}`.
+- `POST /api/portfolio/trade` returns `{"trade": {...}, "portfolio": {...}}` (the executed trade plus the resulting post-trade portfolio object).
+- Percentage fields use the **`_pct` suffix**, not `_percent`, everywhere: `unrealized_pnl_pct` (per-position), `change_pct` (watchlist daily change).
+- The portfolio-level aggregate field is named `unrealized_pnl` (not `total_unrealized_pnl`).
+- `GET /api/watchlist` items **must** include `added_at` (already required by §7's schema — if a backend implementation omits it, that's a bug to fix, not an ambiguity to resolve).
+- `POST /api/chat`'s per-trade action entries include a `status` of `"executed" | "failed" | "skipped"` and an optional per-entry `error` string (needed to represent §13.7's skip-on-mid-sequence-failure semantics), plus a top-level aggregate `errors: string[]` for the turn. Frontend must render trade status (not just success/failure as a single boolean).
+- **New endpoint**: `GET /api/chat/history` returns the full `chat_messages` log for `user_id="default"`, oldest first, so the chat panel can restore prior conversation on page reload (same precedent as §13.5's `GET /api/trades` — stored data gets a read path). Frontend loads this once on mount to hydrate the chat panel.

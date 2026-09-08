@@ -1,0 +1,44 @@
+# E2E test stack: the FinAlly app container plus a Playwright container.
+# Keeps browser dependencies out of the production image (PLAN.md §12).
+#
+#   docker compose -f test/docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from playwright
+#
+# The app runs with LLM_MOCK=true so chat responses are deterministic, and with
+# no MASSIVE_API_KEY so the built-in simulator drives prices (PLAN.md §5).
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      # Deterministic, rule-based chat responses -- no OpenRouter call, no API key needed.
+      LLM_MOCK: "true"
+      # Empty => built-in GBM simulator rather than the Massive REST poller.
+      MASSIVE_API_KEY: ""
+      OPENROUTER_API_KEY: "test-key-not-used-in-mock-mode"
+    # Each run starts from an empty database so the "fresh start" specs see
+    # exactly the seed data from PLAN.md §7 rather than a previous run's trades.
+    tmpfs:
+      - /app/db
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=2).status == 200 else 1)"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.49.0-noble
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      BASE_URL: "http://app:8000"
+      CI: "true"
+    working_dir: /e2e
+    volumes:
+      - .:/e2e
+    command: sh -c "npm ci && npx playwright test"

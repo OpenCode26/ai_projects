@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+:root {
+  /* Surfaces */
+  --color-bg: #0d1117;
+  --color-panel: #12161f;
+  --color-panel-raised: #171c27;
+  --color-border: #262b36;
+  --color-border-strong: #333a48;
+
+  /* Text */
+  --color-text-primary: #e6e8ee;
+  --color-text-secondary: #8b93a3;
+  --color-text-muted: #5b6272;
+
+  /* Accents (pinned, PLAN.md §2) */
+  --color-accent-yellow: #ecad0a;
+  --color-accent-blue: #209dd7;
+  --color-accent-purple: #753991;
+
+  /* P&L / semantic (pinned, PLAN.md §13.10) */
+  --color-positive: #26a69a;
+  --color-negative: #ef5350;
+
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-panel: var(--color-panel);
+  --color-panel-raised: var(--color-panel-raised);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-accent-yellow: var(--color-accent-yellow);
+  --color-accent-blue: var(--color-accent-blue);
+  --color-accent-purple: var(--color-accent-purple);
+  --color-positive: var(--color-positive);
+  --color-negative: var(--color-negative);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "cv05" 1;
+}
+
+.font-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Price flash animation — PLAN.md §13.10: ~20% opacity tint fading over ~500ms */
+@keyframes flash-up {
+  0% {
+    background-color: rgb(from var(--color-positive) r g b / 32%);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes flash-down {
+  0% {
+    background-color: rgb(from var(--color-negative) r g b / 32%);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.flash-up {
+  animation: flash-up 500ms ease-out;
+}
+
+.flash-down {
+  animation: flash-down 500ms ease-out;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(from currentColor r g b / 45%);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgb(from currentColor r g b / 0%);
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* Thin, dark scrollbars to keep the terminal feel dense */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-strong);
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-up,
+  .flash-down,
+  .pulse-dot {
+    animation: none;
+  }
+}
